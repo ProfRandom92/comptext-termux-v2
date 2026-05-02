@@ -1,0 +1,29 @@
+name: dev
+description: "Reduziert Git-Diffs, Test-Outputs, Build-Logs auf wesentliche Infos"
+
+filters:
+  - type: drop_lines
+    contains:
+      - "Your branch is up to date"
+      - "nothing to commit"
+      - "no changes added"
+      - "Untracked files:"
+      - "hint:"
+      - "PASSED"
+      - "passed in"
+      - "warnings summary"
+      - "DeprecationWarning"
+
+  - type: keep_section
+    trigger: "diff --git"
+    end_triggers:
+      - "diff --git"
+    max_lines: 80
+
+  - type: collapse_repeats
+    min_repeats: 3
+    replacement: "[... {n} ähnliche Zeilen gekürzt ...]"
+
+  - type: max_lines
+    limit: 200
+    truncate_msg: "\n[comptext-runtime] Output auf 200 Zeilen begrenzt."

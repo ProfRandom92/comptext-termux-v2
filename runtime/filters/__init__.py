@@ -1,0 +1,1 @@
+"""CompText Runtime – Filter-Sammlung."""

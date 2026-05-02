@@ -1,0 +1,15 @@
+name: log
+description: "Entfernt redundante Log-Zeilen, behält nur Errors/Warnings"
+
+filters:
+  - type: keep_levels
+    levels: ["ERROR", "CRITICAL", "WARNING", "WARN", "Exception", "Traceback"]
+    fallback_max_lines: 30
+
+  - type: collapse_repeats
+    min_repeats: 3
+    replacement: "[{n}x: {line}]"
+
+  - type: max_lines
+    limit: 80
+    truncate_msg: "\n[comptext-runtime] Log auf 80 Zeilen begrenzt."

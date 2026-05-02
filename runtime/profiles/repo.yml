@@ -1,0 +1,25 @@
+name: repo
+description: "Kürzt Verzeichnis-Listings, SQLite-Outputs und JSON-Strukturen"
+
+filters:
+  - type: drop_lines
+    contains:
+      - ".pyc"
+      - "__pycache__"
+      - ".DS_Store"
+      - ".git/"
+
+  - type: json_extract
+    fields:
+      - "id"
+      - "name"
+      - "status"
+      - "error"
+
+  - type: collapse_repeats
+    min_repeats: 5
+    replacement: "[... {n} ähnliche Einträge ...]"
+
+  - type: max_lines
+    limit: 100
+    truncate_msg: "\n[comptext-runtime] Listing auf 100 Zeilen begrenzt."

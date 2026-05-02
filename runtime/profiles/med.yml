@@ -1,0 +1,30 @@
+name: med
+description: "Normalisiert klinische Texte und Befunde auf CompText-DSL"
+
+filters:
+  - type: drop_lines
+    contains:
+      - "DEBUG"
+      - "INFO:"
+      - "WARNING:"
+      - "Traceback (most recent"
+      - "------------------"
+
+  - type: abbreviate_medical
+    enabled: true
+    mappings:
+      "Akutes Koronarsyndrom": "ACS"
+      "Myokardinfarkt": "MI"
+      "Bluthochdruck": "aHTN"
+      "Herzinsuffizienz": "HI"
+      "Diabetes mellitus Typ 2": "DM2"
+      "chronisch obstruktive Lungenerkrankung": "COPD"
+      "Vorhofflimmern": "VHF"
+
+  - type: collapse_repeats
+    min_repeats: 2
+    replacement: "[{n}x]"
+
+  - type: max_lines
+    limit: 150
+    truncate_msg: "\n[comptext-runtime] Klinischer Output auf 150 Zeilen begrenzt."
