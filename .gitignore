@@ -1,0 +1,37 @@
+# Modelle (zu groß für GitHub)
+models/
+*.gguf
+*.bin
+*.safetensors
+
+# Datenbanken (persönliche Daten)
+data/*.db
+data/*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Generierte Module (optional committen)
+# modules/*.py  # auskommentieren wenn du Module versionieren willst
+
+# Logs
+*.log
+logs/
+
+# Termux-spezifisch
+.termux/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
