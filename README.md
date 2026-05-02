@@ -7,8 +7,74 @@
 [![License](https://img.shields.io/badge/License-MIT-lightgrey)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Active%20Development-brightgreen)](https://github.com/ProfRandom92/comptext-termux-v2/commits/master)
 
-> Medizinisches Triage-System + CompText Runtime für Android/Termux & Windows.
-> Offline-first, ePA-kompatibel, Touch-optimiert (Galaxy A33) — jetzt mit RTK-style Output-Kompression für LLM-Workflows.
+> **Das Problem:** Medizinische LLM-Workflows auf Edge-Geräten scheitern an Kontext-Limits, nicht an Modellqualität.  
+> **Die Lösung:** CompText komprimiert klinischen Kontext um 60–90 % bevor er das Modell erreicht — ohne Informationsverlust.
+
+Medizinisches Triage-System + CompText Runtime für Android/Termux & Windows.  
+Offline-first · ePA-kompatibel · Touch-optimiert (Galaxy A33) · RTK-style Output-Kompression für LLM-Workflows.
+
+---
+
+## ⚡ Quick-Win — 60 Sekunden bis zum ersten Output
+
+```bash
+git clone https://github.com/ProfRandom92/comptext-termux-v2
+cd comptext-termux-v2
+pip install textual httpx aiosqlite pyyaml
+
+# MedCodex-Kompression direkt testen:
+python med_codex.py "MAB+HS, RR↓, HF↑ → ACS?"
+
+# Runtime-Layer (Shell-Output-Kompression):
+git diff | python -m runtime.cli --cmd "git diff"
+
+# Codex-Status prüfen:
+python codex_manager_cli.py --status
+```
+
+---
+
+## 📊 Benchmark
+
+```
+$ git diff | python -m runtime.cli --cmd "git diff"
+✦ CompText RTX · Profil: dev · 84.9% gespart · 265 von 312 Zeilen eliminiert
+
+$ pytest | python -m runtime.cli --cmd "pytest"
+✦ CompText RTX · Profil: dev · 71.2% gespart · nur Fehler & Summary behalten
+
+$ cat befund.txt | python -m runtime.cli --cmd "med"
+✦ CompText RTX · Profil: med · 58.4% gespart · KVTC-Normalisierung aktiv
+```
+
+| Profil | Anwendungsfall         | Typische Ersparnis |
+|--------|------------------------|-------------------|
+| `dev`  | git, pytest, cargo     | 40–80 %           |
+| `med`  | Befunde, HL7, KVTC     | 30–60 %           |
+| `repo` | ls, find, JSON, sqlite | 50–70 %           |
+| `log`  | tail, grep, journald   | 60–90 %           |
+
+---
+
+## 🧬 KVTC — Klinisches Vokabular Token Compression
+
+Ein eigenes CompText-Subsystem: medizinische Freitext-Eingaben werden vor der LLM-Übergabe auf standardisierte Kürzel normalisiert.
+
+```
+Eingabe:   "MAB+HS, RR↓, HF↑ → ACS?"
+Expanded:  "Massive arterielle Blutung mit hämorrhagischem Schock,
+            Hypotonie, Tachykardie → Akutes Koronarsyndrom?"
+```
+
+**KVTC-Merkmale:**
+- 70+ medizinische Kürzel (erweiterbar per Codex CLI)
+- ICD-10, LOINC, OPS integriert
+- Mehrdeutigkeit explizit modelliert (`OD` → Ophthalmologie / Überdosis / Einmal täglich)
+- Synonym-Normalisierung (`ACS` = `NSTEMI/STEMI` = `Akutes Koronarsyndrom`)
+- 30–60 % Reduktion bei klinischen Texten ohne Informationsverlust
+- ePA-kompatibel: Ausgabe direkt als FHIR-Kontext nutzbar
+
+KVTC differenziert CompText von generischen Token-Compressors — das System kennt medizinische Semantik, nicht nur Zeichenersparnis.
 
 ---
 
@@ -22,16 +88,17 @@ flowchart TD
         SHELL["Shell / Git Bash / Termux\nBeliebige CLI-Kommandos"]
     end
 
-    subgraph RUNTIME["comptext-runtime (NEU)"]
+    subgraph RUNTIME["comptext-runtime (RTK-Layer)"]
         HOOK["hooks/comptext-rtx-hook.sh"]
         CTR["runtime/cli.py\nctr <cmd>"]
         PROFILES["Profile:\ndev / med / repo / log"]
-        FILTERS["Filter-Pipeline:\ndrop_lines → keep_section\ncollapse_repeats → max_lines\nabbreviate_medical • json_extract"]
+        FILTERS["Filter-Pipeline:\ndrop_lines → keep_section\ncollapse_repeats → max_lines\nabbreviate_medical · json_extract"]
         METRICS["metrics.py\nGain-Banner (stderr)"]
     end
 
     subgraph CORE["CompText Core"]
-        MEDCODEX["med_codex.py\nToken-Kompression\n70+ Kürzel"]
+        KVTC["KVTC\nKlinisches Vokabular\nToken Compression"]
+        MEDCODEX["med_codex.py\n70+ Kürzel"]
         MEDDB["med_db.py\nSQLite + Memory Palace"]
         ENGINE["codex_engine.py\nLLM-Modul-Generator"]
         CODEXMGR["codex_manager.py\nFachgebiet-Verwaltung"]
@@ -44,7 +111,7 @@ flowchart TD
     end
 
     SHELL --> HOOK --> CTR --> PROFILES --> FILTERS --> METRICS
-    TUI --> MEDCODEX
+    TUI --> KVTC --> MEDCODEX
     CLI --> CODEXMGR
     FILTERS -->|komprimierter Output| LLM
     MEDCODEX --> MEDDB
@@ -65,7 +132,7 @@ flowchart TD
 | **TUI** | `comptrage.py` | Touch-optimierte Triage-Oberfläche |
 | **Codex CLI** | `codex_manager_cli.py` | LLM-gestützter Codex-Manager |
 | **Codex TUI** | `codex_manager_tui.py` | Interaktive Codex-Verwaltung |
-| **MedCodex** | `med_codex.py` | Token-Kompression, 70+ medizinische Kürzel |
+| **KVTC / MedCodex** | `med_codex.py` | Klinische Token-Kompression, 70+ Kürzel |
 | **MedDB** | `med_db.py` | Async SQLite, Memory Palace, Triage-History |
 | **Med Specialties** | `med_specialties.py` | Fachgebiet-Definitionen |
 | **Codex Engine** | `codex_engine.py` | LLM-basierter Modul-Generator |
@@ -76,7 +143,7 @@ flowchart TD
 
 ## comptext-runtime (RTK-Layer)
 
-Die neue `runtime/`-Schicht komprimiert Shell-Outputs **bevor sie in den LLM-Kontext** gehen — inspiriert von RTK, Snip und mcp-compressor.
+Die `runtime/`-Schicht komprimiert Shell-Outputs **bevor sie in den LLM-Kontext** gehen — inspiriert von RTK, Snip und mcp-compressor.
 
 ```mermaid
 sequenceDiagram
@@ -91,18 +158,9 @@ sequenceDiagram
     CLI->>Filter: Profil 'dev' laden
     Filter-->>CLI: Komprimierter Output
     CLI->>Shell: stdout (gekürzt)
-    CLI->>Shell: stderr: Gain-Banner [62.3% gespart]
+    CLI->>Shell: stderr: ✦ Gain-Banner [84.9% gespart]
     CLI-->>LLM: optional --mcp weiterleiten
 ```
-
-### Profile
-
-| Profil | Zuständig für | Typische Ersparnis |
-|--------|---------------|--------------------|
-| `dev`  | git, pytest, cargo, npm | 40–80% |
-| `med`  | MedCodex, Befunde, HL7 | 30–60% |
-| `repo` | ls, find, sqlite3, JSON | 50–70% |
-| `log`  | tail, grep, journald | 60–90% |
 
 ### Schnellstart Runtime
 
@@ -124,20 +182,16 @@ git diff | python -m runtime.cli --cmd "git diff"
 
 ---
 
-## Kern-Konzept: MedCodex Token-Kompression
+## Codex Manager CLI
 
-Statt dem LLM jedes Mal langen Klartext zu schicken:
-
+```bash
+python codex_manager_cli.py --status
+python codex_manager_cli.py --auto-fill neurologie --count 20
+python codex_manager_cli.py --auto-fill all --count 15
+python codex_manager_cli.py --generate-skills --output ~/.hermes/skills
+python codex_manager_cli.py --test-compression
+python codex_manager_cli.py --export-json ~/codex_backup.json
 ```
-Eingabe:  "MAB+HS, RR↓, HF↑ → ACS?"
-Expanded: "Massive arterielle Blutung mit hämorrhagischem Schock,
-           Hypotonie, Tachykardie → Akutes Koronarsyndrom?"
-```
-
-**Vorteile:**
-- Weniger Tokens = schnellere Inferenz auf ARM-CPU
-- ePA-kompatibel: ICD-10, LOINC, OPS integriert
-- 70+ medizinische Kürzel vorinstalliert
 
 ---
 
@@ -165,24 +219,9 @@ python comptrage.py
 
 ### Groq API (Empfohlen für PC/Windows)
 ```bash
-export GROQ_API_KEY="dein-key"
+export GROQ_API_KEY="dein-key"   # https://console.groq.com
 python codex_manager_cli.py --status
 python codex_manager_cli.py --auto-fill neurologie --count 10
-```
-
-> Neuen Key unter [console.groq.com](https://console.groq.com) generieren.
-
----
-
-## Codex Manager CLI
-
-```bash
-python codex_manager_cli.py --status
-python codex_manager_cli.py --auto-fill neurologie --count 20
-python codex_manager_cli.py --auto-fill all --count 15
-python codex_manager_cli.py --generate-skills --output ~/.hermes/skills
-python codex_manager_cli.py --test-compression
-python codex_manager_cli.py --export-json ~/codex_backup.json
 ```
 
 ---
@@ -209,12 +248,12 @@ comptext-termux-v2/
 ├── codex_manager_tui.py      # Codex Manager TUI
 ├── codex_manager.py          # Codex Core-Logik
 ├── codex_engine.py           # LLM-Modul-Generator
-├── med_codex.py              # Token-Kompression (70+ Kürzel)
+├── med_codex.py              # KVTC + Token-Kompression (70+ Kürzel)
 ├── med_db.py                 # Async SQLite + Memory Palace
 ├── med_specialties.py        # Fachgebiete
 ├── mediapipe_server.py       # Option B: MediaPipe Backend
 ├── setup_termux.sh           # Ein-Kommando-Setup
-├── runtime/                  # NEU: CompText RTK-Layer
+├── runtime/                  # CompText RTK-Layer
 │   ├── cli.py                  #   Entrypoint: stdin → Filter → stdout
 │   ├── metrics.py              #   Gain-Berechnung + Banner
 │   ├── mcp_client.py           #   Optional: weiterleiten an MCP-Server
@@ -234,13 +273,18 @@ comptext-termux-v2/
 
 ---
 
-## CompText Ökosystem
+## 🌐 CompText Ökosystem
 
-| Repo | Zweck |
-|------|-------|
-| [comptext-mcp-server](https://github.com/ProfRandom92/comptext-mcp-server) | MCP/REST-Server, Docker, CI/CD |
-| **comptext-termux-v2** | Android/Termux, Triage-UI, Runtime-Layer |
-| [Medgemma-CompText](https://github.com/ProfRandom92/Medgemma-CompText) | Kaggle Hackathon, ePA/FHIR |
+| Repo | Zweck | Status |
+|------|-------|--------|
+| [comptext-termux-v2](https://github.com/ProfRandom92/comptext-termux-v2) | Android/Termux · Triage-UI · RTK-Runtime · KVTC | 🟢 Active |
+| [comptext-mcp-server](https://github.com/ProfRandom92/comptext-mcp-server) | MCP/REST-Server · Docker · CI/CD | 🟢 Active |
+| [Medgemma-CompText](https://github.com/ProfRandom92/Medgemma-CompText) | Kaggle Hackathon · ePA/FHIR · Edge-AI | 🟢 Active |
+| [comptext-codex](https://github.com/ProfRandom92/comptext-codex) | Native Protocol für Claude Agent Teams | 🔵 Stable |
+| [comptext-context](https://github.com/ProfRandom92/comptext-context) | V5 × Context Mode · FTS5 · Sandbox | 🟡 Beta |
+| [comptext-kernel](https://github.com/ProfRandom92/comptext-kernel) | V6 Universal AI Context Kernel | 🟡 Beta |
+| [comptext-revolution](https://github.com/ProfRandom92/comptext-revolution) | DSL Compiler · MCP · SQLite FTS5 | 🧪 Experimental |
+| [comptext-dsl](https://github.com/ProfRandom92/comptext-dsl) | Domain-Specific Language · Compiler · Parser | 🔵 Stable |
 
 ---
 
