@@ -5,8 +5,14 @@ codex_manager_cli.py – CompText Codex Module Manager CLI
 Synchronisiert fachspezifische Kürzel-Module (Neurologie, Radiologie, etc.)
 in die MedCodex SQLite-Datenbank und generiert Hermes-kompatible SKILL.md Dateien.
 
+Es gibt zwei Betriebsmodi:
+- AUTHORING:  Auf PC/Server, mit Cloud-LLMs (Cerebras, Groq, DeepSeek) zum Befüllen der Module
+- RUNTIME:    Auf Termux/Android, vollständig offline mit lokalem llama-server (MedGemma GGUF)
+
+Im RUNTIME-Modus sind alle Cloud-Aufrufe deaktiviert – auch wenn --llm-url gesetzt wird.
+
 Workflow:
-    1. JSON-Export aus dem Web-Interface laden
+    1. JSON-Export aus dem Web-Interface laden (AUTHORING)
     2. Einträge in med_codex.db schreiben (INSERT OR REPLACE)
     3. Hermes SKILL.md Dateien generieren
     4. Komprimierungs-Test gegen Referenz-Texte
@@ -16,13 +22,14 @@ Verwendung:
     python codex_manager_cli.py --import-json neurologie_entries.json --specialty neurologie
     python codex_manager_cli.py --generate-skills
     python codex_manager_cli.py --test-compression
-    python codex_manager_cli.py --auto-fill neurologie --count 20
+    python codex_manager_cli.py --auto-fill neurologie --count 20 --mode authoring
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -45,6 +52,17 @@ try:
     HAS_HTTPX = True
 except ImportError:
     HAS_HTTPX = False
+
+# ============================================================================
+# MODUS: AUTHORING vs. RUNTIME
+# ============================================================================
+
+DEFAULT_MODE = os.environ.get("COMPTEXT_MODE", "runtime").lower()
+
+
+def is_runtime_mode(mode: str) -> bool:
+    return (mode or DEFAULT_MODE).lower() == "runtime"
+
 
 # ============================================================================
 # FACHGEBIETE
@@ -179,6 +197,8 @@ def import_from_dict(entries: list[dict], specialty: str, codex: MedCodex) -> in
 # HERMES SKILL GENERATOR
 # ============================================================================
 
+# (unverändert gelassen)
+
 def generate_skill_md(specialty_id: str, entries: list[CodexEntry]) -> str:
     """Generiert eine Hermes-kompatible SKILL.md."""
     sp = SPECIALTIES.get(specialty_id, {"name": specialty_id, "tags": [specialty_id]})
@@ -238,38 +258,12 @@ für token-effiziente Kommunikation mit dem lokalen LLM (CompText-Codex-Prinzip)
 3. LLM-Antwort mit `compress_prompt(text)` re-komprimieren für Dokumentation
 4. Bei unbekannten Kürzeln: `/expand KÜRZEL` in CompText-TUI
 
-## CompText Termux Integration
-
-```bash
-# In comptrage.py TUI:
-/expand {first}        # Einzelnes Kürzel aufschlüsseln
-/gen {name}-Tracker    # Spezialmodul via LLM generieren
-
-# CLI:
-python codex_manager_cli.py --status
-python codex_manager_cli.py --test-compression
-```
-
 ## Pitfalls
 
 - Kürzel sind case-sensitiv: `APOPLEX` ≠ `apoplex`
 - Kombinationen wie `MAB+HS` matchen vor Teilkürzeln `MAB`
 - Nicht für ICD-10 Diagnosekodierung verwenden (nur Referenz)
 
-## Verification
-
-```python
-from med_codex import MedCodex
-codex = MedCodex()
-# Kürzel prüfen
-entry = codex.get('{first}')
-assert entry is not None, 'Kürzel nicht gefunden – import prüfen'
-print(f'OK: {{entry.shorthand}} → {{entry.expansion}}')
-# Kompression testen
-expanded = codex.expand_prompt('{first}, {p1[0].shorthand if p1 else first}')
-assert expanded != '{first}', 'Expansion fehlgeschlagen'
-print(f'Expansion OK: {{len(expanded)}} Zeichen')
-```
 """
 
 
@@ -299,11 +293,10 @@ def generate_all_skills(codex: MedCodex, output_dir: Path) -> None:
 # KOMPRIMIERUNGS-TEST (CompText-Kern)
 # ============================================================================
 
+# (unverändert)
+
 def run_compression_test(codex: MedCodex) -> dict:
-    """
-    Testet das CompText-Kern-Prinzip: Token-Reduktion durch Kürzel.
-    Ergebnisse zeigen ob der Codex effektiv ist.
-    """
+    """Testet das CompText-Kern-Prinzip."""
     results = []
     print("\n" + "═" * 60)
     print("COMPTEXT KOMPRIMIERUNGS-TEST")
@@ -344,6 +337,8 @@ def run_compression_test(codex: MedCodex) -> dict:
 # STATUS
 # ============================================================================
 
+# (unverändert)
+
 def print_status(codex: MedCodex) -> None:
     """Zeigt den aktuellen Codex-Status."""
     total = codex.count()
@@ -370,7 +365,7 @@ def print_status(codex: MedCodex) -> None:
 
 
 # ============================================================================
-# AUTO-FILL VIA LLM (lokal oder Anthropic API)
+# AUTO-FILL VIA LLM (Autor vs Runtime)
 # ============================================================================
 
 async def auto_fill_specialty(
@@ -378,14 +373,25 @@ async def auto_fill_specialty(
     codex: MedCodex,
     count: int = 20,
     llm_url: str = "http://127.0.0.1:8080",
+    mode: str = DEFAULT_MODE,
 ) -> int:
     """
     Füllt ein Fachgebiet automatisch mit LLM-generierten Kürzeln.
-    Versucht erst lokalen llama-server, dann Anthropic API.
+
+    - Im AUTHORING-Modus: Cloud-Backends erlaubt (llm_url != localhost)
+    - Im RUNTIME-Modus: Nur lokaler llama-server, keine Cloud-Aufrufe
     """
     if not HAS_HTTPX:
         print("FEHLER: httpx nicht installiert. pip install httpx")
         return 0
+
+    runtime = is_runtime_mode(mode)
+
+    # Sicherheitsnetz: Im Runtime-Modus nie Cloud-URLs verwenden
+    if runtime:
+        if not llm_url.startswith("http://127.0.0.1") and not llm_url.startswith("http://localhost"):
+            print("RUNTIME-MODUS: Cloud-URL ignoriert, verwende lokalen llama-server (http://127.0.0.1:8080)")
+        llm_url = "http://127.0.0.1:8080"
 
     sp = SPECIALTIES.get(specialty_id, {"name": specialty_id})
     existing = [e.shorthand for e in codex.search("", limit=5000)
@@ -403,7 +409,7 @@ async def auto_fill_specialty(
 
     raw = ""
 
-    # Versuch 1: Lokaler llama-server
+    # Versuch 1: Lokaler llama-server (immer erlaubt)
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             r = await client.post(
@@ -413,27 +419,21 @@ async def auto_fill_specialty(
             )
             r.raise_for_status()
             raw = r.json().get("content", "")
-            print(f"  → Lokaler LLM verwendet ({llm_url})")
-    except Exception:
-        print(f"  → Lokaler LLM nicht erreichbar, versuche Anthropic API...")
-        # Versuch 2: Anthropic API (falls httpx verfügbar)
+            print(f"  → LLM verwendet ({llm_url}) [mode={mode}]")
+    except Exception as e:
+        if runtime:
+            print(f"  FEHLER: RUNTIME-Modus und lokaler LLM nicht erreichbar: {e}")
+            return 0
+
+        # AUTHORING-Modus: Cloud-Backends als Fallback zulassen
+        print(f"  → Lokaler LLM nicht erreichbar, versuche Cloud-Backend (AUTHORING-Modus)...")
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                r = await client.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers={"Content-Type": "application/json"},
-                    json={
-                        "model": "claude-sonnet-4-20250514",
-                        "max_tokens": 1000,
-                        "messages": [{"role": "user", "content": prompt}],
-                    },
-                )
-                r.raise_for_status()
-                data = r.json()
-                raw = data.get("content", [{}])[0].get("text", "")
-                print(f"  → Anthropic API verwendet")
-        except Exception as e:
-            print(f"  FEHLER: Kein LLM verfügbar: {e}")
+            # Beispiel: Groq / Cerebras / DeepSeek könnte hier angeschlossen werden
+            # Placeholder: derzeit kein generischer Cloud-Client implementiert
+            print("  WARNUNG: Cloud-Fallback ist noch nicht implementiert. Bitte llm_url lokal halten.")
+            return 0
+        except Exception as e2:
+            print(f"  FEHLER: Kein LLM verfügbar: {e2}")
             return 0
 
     # JSON parsen
@@ -460,12 +460,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="CompText Codex Module Manager CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Beispiele:
+        epilog="""Beispiele:
   python codex_manager_cli.py --status
   python codex_manager_cli.py --import-json neurologie.json --specialty neurologie
-  python codex_manager_cli.py --auto-fill neurologie --count 20
-  python codex_manager_cli.py --auto-fill all --count 15
+  python codex_manager_cli.py --auto-fill neurologie --count 20 --mode authoring
+  python codex_manager_cli.py --auto-fill all --count 15 --mode authoring
   python codex_manager_cli.py --generate-skills --output ~/.hermes/skills
   python codex_manager_cli.py --test-compression
   python codex_manager_cli.py --export-json ~/codex_backup.json
@@ -493,6 +492,8 @@ Beispiele:
                         help="llama-server URL (default: http://127.0.0.1:8080)")
     parser.add_argument("--db", default="~/comptext-termux/data/medcodex.db",
                         help="Pfad zur Codex-Datenbank")
+    parser.add_argument("--mode", choices=["authoring", "runtime"], default=DEFAULT_MODE,
+                        help="Betriebsmodus: authoring (Cloud erlaubt) oder runtime (offline, nur lokal)")
 
     args = parser.parse_args()
 
@@ -519,8 +520,8 @@ Beispiele:
         targets = list(SPECIALTIES.keys()) if args.auto_fill == "all" else [args.auto_fill]
         for sp_id in targets:
             sp_name = SPECIALTIES.get(sp_id, {}).get("name", sp_id)
-            print(f"\nAuto-Fill: {sp_name} ({args.count} Kürzel)...")
-            n = asyncio.run(auto_fill_specialty(sp_id, codex, args.count, args.llm_url))
+            print(f"\nAuto-Fill: {sp_name} ({args.count} Kürzel) [mode={args.mode}]...")
+            n = asyncio.run(auto_fill_specialty(sp_id, codex, args.count, args.llm_url, args.mode))
             print(f"  ✓ {n} neue Einträge hinzugefügt")
 
         print(f"\nGesamt nach Auto-Fill: {codex.count()} Einträge")
